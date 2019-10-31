@@ -14,6 +14,7 @@ require (
 	github.com/gtank/merlin v0.1.1
 	github.com/libp2p/go-buffer-pool v0.0.2
 	github.com/minio/highwayhash v1.0.1
+	github.com/oasisprotocol/ed25519 v0.0.0-20201030131637-e591887917cc
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
