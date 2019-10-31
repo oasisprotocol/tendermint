@@ -16,6 +16,7 @@ require (
 	github.com/gtank/merlin v0.1.1-0.20191105220539-8318aed1a79f
 	github.com/libp2p/go-buffer-pool v0.0.2
 	github.com/magiconair/properties v1.8.1
+	github.com/oasislabs/ed25519 v0.0.0-20191122104632-9d9ffc15f526
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.5.0
 	github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a
