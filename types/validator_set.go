@@ -10,6 +10,8 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/tendermint/tendermint/crypto"
+	"github.com/tendermint/tendermint/crypto/batchsig"
 	"github.com/tendermint/tendermint/crypto/merkle"
 )
 
@@ -611,24 +613,50 @@ func (vals *ValidatorSet) VerifyCommit(chainID string, blockID BlockID, height i
 
 	talliedVotingPower := int64(0)
 
+	// Aggregate all of the validator public key/messages/signatures.
+	var sigIdx int
+	validatorPublicKeys := make([]crypto.PubKey, 0, len(commit.Precommits))
+	commitMessages := make([][]byte, 0, len(commit.Precommits))
+	commitSignatures := make([][]byte, 0, len(commit.Precommits))
 	for idx, precommit := range commit.Precommits {
 		if precommit == nil {
 			continue // OK, some precommits can be missing.
 		}
-		_, val := vals.GetByIndex(idx)
-		// Validate signature.
-		precommitSignBytes := commit.VoteSignBytes(chainID, idx)
-		if !val.PubKey.VerifyBytes(precommitSignBytes, precommit.Signature) {
+
+		val := vals.Validators[idx] // Not using the accesor saves a copy.
+		validatorPublicKeys = append(validatorPublicKeys, val.PubKey)
+		commitMessages = append(commitMessages, commit.VoteSignBytes(chainID, idx))
+		commitSignatures = append(commitSignatures, commit.Precommits[idx].Signature)
+
+		sigIdx++
+	}
+
+	// Validate all of the signatures.
+	validSigs, err := batchsig.VerifyBatch(validatorPublicKeys, commitMessages, commitSignatures)
+	if err != nil {
+		return err
+	}
+
+	// Accumulate the voting power based on the valid signatures.
+	sigIdx = 0
+	for idx, precommit := range commit.Precommits {
+		if precommit == nil {
+			continue // OK, some precommits can be missing.
+		}
+		if !validSigs[sigIdx] {
 			return fmt.Errorf("Invalid commit -- invalid signature: %v", precommit)
 		}
 		// Good precommit!
 		if blockID.Equals(precommit.BlockID) {
+			val := vals.Validators[idx] // Not using the accesor saves a copy.
 			talliedVotingPower += val.VotingPower
 		}
 		// else {
 		// It's OK that the BlockID doesn't match.  We include stray
 		// precommits to measure validator availability.
 		// }
+
+		sigIdx++
 	}
 
 	if talliedVotingPower > vals.TotalVotingPower()*2/3 {
