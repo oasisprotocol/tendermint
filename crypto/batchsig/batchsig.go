@@ -31,7 +31,16 @@ func VerifyBatch(pubKeys []crypto.PubKey, msgs, sigs [][]byte) ([]bool, error) {
 
 		nativePubKeys = append(nativePubKeys, ed25519.PublicKey(edPubKey[:]))
 	}
-	_, validSigs, err := ed25519.VerifyBatch(nil, nativePubKeys, msgs, sigs, &defaultOptions)
+
+	var (
+		validSigs []bool
+		err       error
+	)
+	if tmEd25519.OasisDomainSeparationEnabled() {
+		validSigs, err = tmEd25519.OasisVerifyBatchContext(nativePubKeys, msgs, sigs)
+	} else {
+		_, validSigs, err = ed25519.VerifyBatch(nil, nativePubKeys, msgs, sigs, &defaultOptions)
+	}
 	return validSigs, err
 }
 

@@ -3,7 +3,6 @@ package ed25519
 import (
 	"bytes"
 	"crypto/subtle"
-	"fmt"
 	"io"
 
 	"github.com/oasisprotocol/ed25519"
@@ -55,6 +54,9 @@ func (privKey PrivKey) Bytes() []byte {
 // If these conditions aren't met, Sign will panic or produce an
 // incorrect signature.
 func (privKey PrivKey) Sign(msg []byte) ([]byte, error) {
+	if oasisDomainSeparatorEnabled {
+		return oasisSignContext(privKey, msg)
+	}
 	signatureBytes := ed25519.Sign(ed25519.PrivateKey(privKey), msg)
 	return signatureBytes, nil
 }
@@ -150,12 +152,10 @@ func (pubKey PubKey) VerifySignature(msg []byte, sig []byte) bool {
 	if len(sig) != SignatureSize {
 		return false
 	}
-
+	if oasisDomainSeparatorEnabled {
+		return oasisVerifyBytesContext(pubKey, msg, sig)
+	}
 	return ed25519.Verify(ed25519.PublicKey(pubKey), msg, sig)
-}
-
-func (pubKey PubKey) String() string {
-	return fmt.Sprintf("PubKeyEd25519{%X}", []byte(pubKey))
 }
 
 func (pubKey PubKey) Type() string {
