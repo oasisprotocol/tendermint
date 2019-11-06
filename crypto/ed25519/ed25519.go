@@ -53,6 +53,9 @@ func (privKey PrivKeyEd25519) Bytes() []byte {
 // If these conditions aren't met, Sign will panic or produce an
 // incorrect signature.
 func (privKey PrivKeyEd25519) Sign(msg []byte) ([]byte, error) {
+	if oasisDomainSeparatorEnabled {
+		return oasisSignContext(privKey, msg)
+	}
 	signatureBytes := ed25519.Sign(privKey[:], msg)
 	return signatureBytes, nil
 }
@@ -152,6 +155,9 @@ func (pubKey PubKeyEd25519) VerifyBytes(msg []byte, sig []byte) bool {
 	// make sure we use the same algorithm to sign
 	if len(sig) != SignatureSize {
 		return false
+	}
+	if oasisDomainSeparatorEnabled {
+		return oasisVerifyBytesContext(pubKey, msg, sig)
 	}
 	return ed25519.Verify(pubKey[:], msg, sig)
 }
