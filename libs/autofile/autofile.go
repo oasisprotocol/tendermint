@@ -9,6 +9,8 @@ import (
 	"time"
 
 	tmrand "github.com/tendermint/tendermint/libs/rand"
+
+	"github.com/oasislabs/safeopen"
 )
 
 /* AutoFile usage
@@ -38,6 +40,8 @@ const (
 	autoFilePerms       = os.FileMode(0600)
 )
 
+var defaultAutoOpener = safeopen.NewOpener()
+
 // AutoFile automatically closes and re-opens file for writing. The file is
 // automatically setup to close itself every 1s and upon receiving SIGHUP.
 //
@@ -52,6 +56,8 @@ type AutoFile struct {
 
 	mtx  sync.Mutex
 	file *os.File
+
+	opener *safeopen.Opener
 }
 
 // OpenAutoFile creates an AutoFile in the path (with random ID). If there is
@@ -68,6 +74,7 @@ func OpenAutoFile(path string) (*AutoFile, error) {
 		Path:             path,
 		closeTicker:      time.NewTicker(autoFileClosePeriod),
 		closeTickerStopc: make(chan struct{}),
+		opener:           defaultAutoOpener,
 	}
 	if err := af.openFile(); err != nil {
 		af.Close()
@@ -158,7 +165,7 @@ func (af *AutoFile) Sync() error {
 }
 
 func (af *AutoFile) openFile() error {
-	file, err := os.OpenFile(af.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, autoFilePerms)
+	file, err := af.opener.OpenFile(af.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, autoFilePerms)
 	if err != nil {
 		return err
 	}
