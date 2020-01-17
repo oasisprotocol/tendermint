@@ -2,6 +2,7 @@ package autofile
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oasislabs/safeopen"
 
 	cmn "github.com/tendermint/tendermint/libs/common"
 )
@@ -74,6 +77,10 @@ type Group struct {
 
 	// TODO: When we start deleting files, we need to start tracking GroupReaders
 	// and their dependencies.
+
+	opener         *safeopen.Opener
+	openerCanceler context.CancelFunc
+	fdReclaimer    FDReclaimer
 }
 
 // OpenGroup creates a new Group with head at headPath. It returns an error if
@@ -85,6 +92,7 @@ func OpenGroup(headPath string, groupOptions ...func(*Group)) (g *Group, err err
 		return nil, err
 	}
 
+	ctx, cancelFn := context.WithCancel(context.Background())
 	g = &Group{
 		ID:                 "group:" + head.ID,
 		Head:               head,
@@ -96,11 +104,21 @@ func OpenGroup(headPath string, groupOptions ...func(*Group)) (g *Group, err err
 		minIndex:           0,
 		maxIndex:           0,
 		doneProcessTicks:   make(chan struct{}),
+		openerCanceler:     cancelFn,
 	}
 
 	for _, option := range groupOptions {
 		option(g)
 	}
+
+	g.opener = safeopen.NewOpener().WithContext(ctx).WithNotifier(func(error, time.Duration) {
+		if g.fdReclaimer != nil {
+			g.fdReclaimer.Reclaim()
+		}
+	})
+	g.mtx.Lock()
+	g.Head.opener = g.opener
+	g.mtx.Unlock()
 
 	g.BaseService = *cmn.NewBaseService(nil, "Group", g)
 
@@ -131,6 +149,13 @@ func GroupTotalSizeLimit(limit int64) func(*Group) {
 	}
 }
 
+// GroupFDReclaimer allows you to overwrite the fd reclamation hook.
+func GroupFDReclaimer(r FDReclaimer) func(*Group) {
+	return func(g *Group) {
+		g.fdReclaimer = r
+	}
+}
+
 // OnStart implements cmn.Service by starting the goroutine that checks file
 // and group limits.
 func (g *Group) OnStart() error {
@@ -142,6 +167,7 @@ func (g *Group) OnStart() error {
 // OnStop implements cmn.Service by stopping the goroutine described above.
 // NOTE: g.Head must be closed separately using Close.
 func (g *Group) OnStop() {
+	g.openerCanceler()
 	g.ticker.Stop()
 	g.FlushAndSync()
 }
@@ -354,7 +380,7 @@ func (g *Group) readGroupInfo() GroupInfo {
 	var minIndex, maxIndex int = -1, -1
 	var totalSize, headSize int64 = 0, 0
 
-	dir, err := os.Open(groupDir)
+	dir, err := g.opener.Open(groupDir)
 	if err != nil {
 		panic(err)
 	}
@@ -501,7 +527,7 @@ func (gr *GroupReader) openFile(index int) error {
 	}
 
 	curFilePath := filePathForIndex(gr.Head.Path, index, gr.Group.maxIndex)
-	curFile, err := os.OpenFile(curFilePath, os.O_RDONLY|os.O_CREATE, autoFilePerms)
+	curFile, err := gr.opener.OpenFile(curFilePath, os.O_RDONLY|os.O_CREATE, autoFilePerms)
 	if err != nil {
 		return err
 	}
@@ -531,4 +557,10 @@ func (gr *GroupReader) SetIndex(index int) error {
 	gr.mtx.Lock()
 	defer gr.mtx.Unlock()
 	return gr.openFile(index)
+}
+
+// FDReclaimer is the interface for a generic "reclaim file descriptors"
+// routine that will be called when the system exhausts available fds.
+type FDReclaimer interface {
+	Reclaim()
 }

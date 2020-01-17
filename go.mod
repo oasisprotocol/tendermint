@@ -18,6 +18,7 @@ require (
 	github.com/libp2p/go-buffer-pool v0.0.2
 	github.com/magiconair/properties v1.8.1
 	github.com/oasislabs/ed25519 v0.0.0-20191122104632-9d9ffc15f526
+	github.com/oasislabs/safeopen v0.0.0-20200117113835-6aa648f43ff8
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v0.9.3
 	github.com/rcrowley/go-metrics v0.0.0-20180503174638-e2704e165165
