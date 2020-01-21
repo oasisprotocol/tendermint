@@ -655,6 +655,12 @@ func NewNode(config *cfg.Config,
 	// Setup Transport.
 	transport, peerFilters := createTransport(config, nodeInfo, nodeKey, proxyApp)
 
+	// Setup fd reclaimer.
+	fdReclaimer := &nodeFDReclaimer{
+		transport: transport,
+	}
+	consensusState.SetFDReclaimer(fdReclaimer)
+
 	// Setup Switch.
 	p2pLogger := logger.With("module", "p2p")
 	sw := createSwitch(
@@ -773,6 +779,8 @@ func (n *Node) OnStart() error {
 	n.isListening = true
 
 	if n.config.Mempool.WalEnabled() {
+		// XXX/yawning: This could also try to reclaim fds if it hits EMFILE,
+		// but it's not like it panics anymore.
 		err = n.mempool.InitWAL()
 		if err != nil {
 			return fmt.Errorf("init mempool WAL: %w", err)
@@ -1246,4 +1254,12 @@ func splitAndTrimEmpty(s, sep, cutset string) []string {
 		}
 	}
 	return nonEmptyStrings
+}
+
+type nodeFDReclaimer struct {
+	transport *p2p.MultiplexTransport
+}
+
+func (r *nodeFDReclaimer) Reclaim() {
+	r.transport.FlushIncomingConnections()
 }
