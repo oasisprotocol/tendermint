@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	auto "github.com/tendermint/tendermint/libs/autofile"
 	"github.com/gogo/protobuf/proto"
 
 	cfg "github.com/tendermint/tendermint/config"
@@ -139,6 +140,9 @@ type State struct {
 
 	// for reporting metrics
 	metrics *Metrics
+
+	// for trying to recover faster on EMFILE.
+	fdReclaimer auto.FDReclaimer
 }
 
 // StateOption sets an optional parameter on the State.
@@ -203,6 +207,11 @@ func (cs *State) SetLogger(l log.Logger) {
 func (cs *State) SetEventBus(b *types.EventBus) {
 	cs.eventBus = b
 	cs.blockExec.SetEventBus(b)
+}
+
+// SetFDReclaimer sets the fd reclaimer.
+func (cs *State) SetFDReclaimer(r auto.FDReclaimer) {
+	cs.fdReclaimer = r
 }
 
 // StateMetrics sets the metrics.
@@ -430,7 +439,7 @@ func (cs *State) Wait() {
 // OpenWAL opens a file to log all consensus messages and timeouts for
 // deterministic accountability.
 func (cs *State) OpenWAL(walFile string) (WAL, error) {
-	wal, err := NewWAL(walFile)
+	wal, err := NewWAL(walFile, auto.GroupFDReclaimer(cs.fdReclaimer))
 	if err != nil {
 		cs.Logger.Error("failed to open WAL", "file", walFile, "err", err)
 		return nil, err
