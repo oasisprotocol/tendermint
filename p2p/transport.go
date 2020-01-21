@@ -1,9 +1,11 @@
 package p2p
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"golang.org/x/net/netutil"
@@ -23,6 +25,44 @@ const (
 // IPResolver is a behaviour subset of net.Resolver.
 type IPResolver interface {
 	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
+}
+
+type connList struct {
+	sync.Mutex
+
+	inner *list.List
+}
+
+func (l *connList) add(c net.Conn) *list.Element {
+	l.Lock()
+	defer l.Unlock()
+
+	return l.inner.PushBack(c)
+}
+
+func (l *connList) remove(e *list.Element) {
+	l.Lock()
+	defer l.Unlock()
+
+	l.inner.Remove(e)
+}
+
+func (l *connList) flush() {
+	l.Lock()
+	defer l.Unlock()
+
+	for e := l.inner.Front(); e != nil; e = e.Next() {
+		c := e.Value.(net.Conn)
+		_ = c.Close()
+	}
+
+	l.inner = list.New()
+}
+
+func newConnList() *connList {
+	return &connList{
+		inner: list.New(),
+	}
 }
 
 // accept is the container to carry the upgraded connection and NodeInfo from an
@@ -155,6 +195,8 @@ type MultiplexTransport struct {
 	// peer currently. All relevant configuration should be refactored into options
 	// with sane defaults.
 	mConfig conn.MConnConfig
+
+	pendingIncomingConns *connList
 }
 
 // Test multiplexTransport for interface completeness.
@@ -168,16 +210,17 @@ func NewMultiplexTransport(
 	mConfig conn.MConnConfig,
 ) *MultiplexTransport {
 	return &MultiplexTransport{
-		acceptc:          make(chan accept),
-		closec:           make(chan struct{}),
-		dialTimeout:      defaultDialTimeout,
-		filterTimeout:    defaultFilterTimeout,
-		handshakeTimeout: defaultHandshakeTimeout,
-		mConfig:          mConfig,
-		nodeInfo:         nodeInfo,
-		nodeKey:          nodeKey,
-		conns:            NewConnSet(),
-		resolver:         net.DefaultResolver,
+		acceptc:              make(chan accept),
+		closec:               make(chan struct{}),
+		dialTimeout:          defaultDialTimeout,
+		filterTimeout:        defaultFilterTimeout,
+		handshakeTimeout:     defaultHandshakeTimeout,
+		mConfig:              mConfig,
+		nodeInfo:             nodeInfo,
+		nodeKey:              nodeKey,
+		conns:                NewConnSet(),
+		resolver:             net.DefaultResolver,
+		pendingIncomingConns: newConnList(),
 	}
 }
 
@@ -279,6 +322,8 @@ func (mt *MultiplexTransport) acceptPeers() {
 			return
 		}
 
+		e := mt.pendingIncomingConns.add(c)
+
 		// Connection upgrade and filtering should be asynchronous to avoid
 		// Head-of-line blocking[0].
 		// Reference:  https://github.com/tendermint/tendermint/issues/2047
@@ -287,6 +332,8 @@ func (mt *MultiplexTransport) acceptPeers() {
 		go func(c net.Conn) {
 			defer func() {
 				if r := recover(); r != nil {
+					mt.pendingIncomingConns.remove(e)
+
 					err := ErrRejected{
 						conn:          c,
 						err:           fmt.Errorf("recovered from panic: %v", r),
@@ -317,6 +364,8 @@ func (mt *MultiplexTransport) acceptPeers() {
 					netAddr = NewNetAddress(id, addr)
 				}
 			}
+
+			mt.pendingIncomingConns.remove(e)
 
 			select {
 			case mt.acceptc <- accept{netAddr, secretConn, nodeInfo, err}:
@@ -591,4 +640,10 @@ func resolveIPs(resolver IPResolver, c net.Conn) ([]net.IP, error) {
 	}
 
 	return ips, nil
+}
+
+// FlushIncomingConnections flushes all nascent incoming connections
+// that are pending filtering or establishment of link crypto.
+func (mt *MultiplexTransport) FlushIncomingConnections() {
+	mt.pendingIncomingConns.flush()
 }
