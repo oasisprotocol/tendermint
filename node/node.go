@@ -947,7 +947,7 @@ func (n *Node) startRPC() ([]net.Listener, error) {
 	grpcListenAddr := n.config.RPC.GRPCListenAddress
 	if grpcListenAddr != "" {
 		config := rpcserver.DefaultConfig()
-		config.MaxOpenConnections = n.config.RPC.MaxOpenConnections
+		config.MaxOpenConnections = n.config.RPC.GRPCMaxOpenConnections
 		listener, err := rpcserver.Listen(grpcListenAddr, config)
 		if err != nil {
 			return nil, err
