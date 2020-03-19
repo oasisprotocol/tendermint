@@ -149,6 +149,11 @@ LOOP:
 			break LOOP
 		case IsDataCorruptionError(err):
 			cs.Logger.Error("data has been corrupted in last height of consensus WAL", "err", err, "height", csHeight)
+			if cs.config.DebugUnsafeReplayRecoverCorruptedWAL {
+				cs.Logger.Debug("skipping corrupted WAL")
+				// Ignore data corruption error.
+				break LOOP
+			}
 			return err
 		case err != nil:
 			return err
