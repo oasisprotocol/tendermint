@@ -753,6 +753,10 @@ type ConsensusConfig struct {
 	// Reactor sleep duration parameters
 	PeerGossipSleepDuration     time.Duration `mapstructure:"peer_gossip_sleep_duration"`
 	PeerQueryMaj23SleepDuration time.Duration `mapstructure:"peer_query_maj23_sleep_duration"`
+
+	// If set, replay will try to recover from a corrupted WAL error by stopping
+	// WAL replay after encoutering a corrupted message.
+	DebugUnsafeReplayRecoverCorruptedWAL bool `mapstructure:"debug_unsafe_replay_recover_corrupted_wal"`
 }
 
 // DefaultConsensusConfig returns a default configuration for the consensus service
