@@ -2,7 +2,7 @@ module github.com/tendermint/tendermint
 
 go 1.13
 
-replace github.com/gorilla/websocket => github.com/gorilla/websocket v1.4.2
+replace github.com/gorilla/websocket => github.com/gorilla/websocket v1.4.4
 
 require (
 	github.com/ChainSafe/go-schnorrkel v0.0.0-20200405005733-88cbf1b4c40d
