@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tendermint/tendermint/crypto"
+	"github.com/tendermint/tendermint/crypto/batchsig"
 	"github.com/tendermint/tendermint/crypto/merkle"
 	tmmath "github.com/tendermint/tendermint/libs/math"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
@@ -680,6 +682,11 @@ func (vals *ValidatorSet) VerifyCommit(chainID string, blockID BlockID,
 
 	talliedVotingPower := int64(0)
 	votingPowerNeeded := vals.TotalVotingPower() * 2 / 3
+
+	// Aggregate all of the validator public key/messages/signatures.
+	validatorPublicKeys := make([]crypto.PubKey, 0, len(commit.Signatures))
+	commitMessages := make([][]byte, 0, len(commit.Signatures))
+	commitSignatures := make([][]byte, 0, len(commit.Signatures))
 	for idx, commitSig := range commit.Signatures {
 		if commitSig.Absent() {
 			continue // OK, some signatures can be absent.
@@ -689,19 +696,39 @@ func (vals *ValidatorSet) VerifyCommit(chainID string, blockID BlockID,
 		// This means we don't need the validator address or to do any lookup.
 		val := vals.Validators[idx]
 
-		// Validate signature.
-		voteSignBytes := commit.VoteSignBytes(chainID, int32(idx))
-		if !val.PubKey.VerifySignature(voteSignBytes, commitSig.Signature) {
+		validatorPublicKeys = append(validatorPublicKeys, val.PubKey)
+		commitMessages = append(commitMessages, commit.VoteSignBytes(chainID, int32(idx)))
+		commitSignatures = append(commitSignatures, commitSig.Signature)
+	}
+
+	// Validate all of the signatures.
+	validSigs, err := batchsig.VerifyBatch(validatorPublicKeys, commitMessages, commitSignatures)
+	if err != nil {
+		return err
+	}
+
+	// Accumulate the voting power based on the valid signatures.
+	var sigIdx int
+	for idx, commitSig := range commit.Signatures {
+		if commitSig.Absent() {
+			continue // OK, some signatures can be absent.
+		}
+		if !validSigs[sigIdx] {
 			return fmt.Errorf("wrong signature (#%d): %X", idx, commitSig.Signature)
 		}
 		// Good!
 		if commitSig.ForBlock() {
+			// The vals and commit have a 1-to-1 correspondance.
+			// This means we don't need the validator address or to do any lookup.
+			val := vals.Validators[idx]
 			talliedVotingPower += val.VotingPower
 		}
 		// else {
 		// It's OK. We include stray signatures (~votes for nil) to measure
 		// validator availability.
 		// }
+
+		sigIdx++
 	}
 
 	if got, needed := talliedVotingPower, votingPowerNeeded; got <= needed {
