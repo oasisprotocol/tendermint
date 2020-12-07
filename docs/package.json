@@ -7,7 +7,7 @@
     "vuepress-theme-cosmos": "^1.0.73"
   },
   "devDependencies": {
-    "@vuepress/plugin-google-analytics": "^1.2.0"
+    "@vuepress/plugin-google-analytics": "^1.7.1"
   },
   "scripts": {
     "preserve": "./pre.sh",
