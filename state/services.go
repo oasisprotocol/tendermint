@@ -49,7 +49,8 @@ type EvidencePool interface {
 // MockEvidencePool is an empty implementation of EvidencePool, useful for testing.
 type MockEvidencePool struct{}
 
-func (me MockEvidencePool) PendingEvidence(uint32) []types.Evidence { return nil }
-func (me MockEvidencePool) AddEvidence(types.Evidence) error        { return nil }
-func (me MockEvidencePool) Update(*types.Block, State)              {}
-func (me MockEvidencePool) Verify(types.Evidence) error             { return nil }
+func (me MockEvidencePool) PendingEvidence(uint32) []types.Evidence         { return nil }
+func (me MockEvidencePool) AddEvidence(types.Evidence) error                { return nil }
+func (me MockEvidencePool) Update(*types.Block, State)                      {}
+func (me MockEvidencePool) Verify(types.Evidence) error                     { return nil }
+func (me MockEvidencePool) ReportConflictingVotes(*types.Vote, *types.Vote) {}

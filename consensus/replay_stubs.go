@@ -51,13 +51,14 @@ type emptyEvidencePool struct{}
 
 var _ sm.EvidencePool = emptyEvidencePool{}
 
-func (emptyEvidencePool) PendingEvidence(uint32) []types.Evidence { return nil }
-func (emptyEvidencePool) AddEvidence(types.Evidence) error        { return nil }
-func (emptyEvidencePool) Update(*types.Block, sm.State)           {}
-func (emptyEvidencePool) Verify(types.Evidence) error             { return nil }
-func (emptyEvidencePool) IsCommitted(types.Evidence) bool         { return false }
-func (emptyEvidencePool) IsPending(types.Evidence) bool           { return false }
-func (emptyEvidencePool) Header(int64) *types.Header              { return nil }
+func (emptyEvidencePool) PendingEvidence(uint32) []types.Evidence         { return nil }
+func (emptyEvidencePool) AddEvidence(types.Evidence) error                { return nil }
+func (emptyEvidencePool) Update(*types.Block, sm.State)                   {}
+func (emptyEvidencePool) Verify(types.Evidence) error                     { return nil }
+func (emptyEvidencePool) IsCommitted(types.Evidence) bool                 { return false }
+func (emptyEvidencePool) IsPending(types.Evidence) bool                   { return false }
+func (emptyEvidencePool) Header(int64) *types.Header                      { return nil }
+func (emptyEvidencePool) ReportConflictingVotes(*types.Vote, *types.Vote) {}
 
 //-----------------------------------------------------------------------------
 // mockProxyApp uses ABCIResponses to give the right results.

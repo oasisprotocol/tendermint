@@ -37,6 +37,10 @@ type Pool struct {
 	mtx sync.Mutex
 	// latest state
 	state sm.State
+	// evidence from consensus is buffered to this slice, awaiting until the next height
+	// before being flushed to the pool. This prevents broadcasting and proposing of
+	// evidence before the height with which the evidence happened is finished.
+	consensusBuffer []duplicateVoteSet
 }
 
 // NewPool creates an evidence pool. If using an existing evidence store,
@@ -47,12 +51,13 @@ func NewPool(evidenceDB dbm.DB, stateDB StateStore, blockStore BlockStore) (*Poo
 	)
 
 	pool := &Pool{
-		stateDB:       stateDB,
-		blockStore:    blockStore,
-		state:         state,
-		logger:        log.NewNopLogger(),
-		evidenceStore: evidenceDB,
-		evidenceList:  clist.New(),
+		stateDB:         stateDB,
+		blockStore:      blockStore,
+		state:           state,
+		logger:          log.NewNopLogger(),
+		evidenceStore:   evidenceDB,
+		evidenceList:    clist.New(),
+		consensusBuffer: make([]duplicateVoteSet, 0),
 	}
 
 	// if pending evidence already in db, in event of prior failure, then load it back to the evidenceList
@@ -96,7 +101,10 @@ func (evpool *Pool) Update(block *types.Block, state sm.State) {
 		)
 	}
 
-	// update the state
+	// flush conflicting vote pairs from the buffer, producing DuplicateVoteEvidence and
+	// adding it to the pool
+	evpool.processConsensusBuffer(state)
+	// update state
 	evpool.updateState(state)
 
 	// remove evidence from pending and mark committed
@@ -136,6 +144,15 @@ func (evpool *Pool) AddEvidence(ev types.Evidence) error {
 	evpool.logger.Info("Verified new evidence of byzantine behavior", "evidence", ev)
 
 	return nil
+}
+
+func (evpool *Pool) ReportConflictingVotes(voteA, voteB *types.Vote) {
+	evpool.mtx.Lock()
+	defer evpool.mtx.Unlock()
+	evpool.consensusBuffer = append(evpool.consensusBuffer, duplicateVoteSet{
+		VoteA: voteA,
+		VoteB: voteB,
+	})
 }
 
 // Verify verifies the evidence against the node's (or evidence pool's) state. More specifically, to validate
@@ -371,6 +388,78 @@ func (evpool *Pool) updateState(state sm.State) {
 	evpool.mtx.Lock()
 	defer evpool.mtx.Unlock()
 	evpool.state = state
+}
+
+// processConsensusBuffer converts all the duplicate votes witnessed from consensus
+// into DuplicateVoteEvidence. It sets the evidence timestamp to the block height
+// from the most recently committed block.
+// Evidence is then added to the pool so as to be ready to be broadcasted and proposed.
+func (evpool *Pool) processConsensusBuffer(state sm.State) {
+	evpool.mtx.Lock()
+	defer evpool.mtx.Unlock()
+	for _, voteSet := range evpool.consensusBuffer {
+
+		// Check the height of the conflicting votes and fetch the corresponding time and validator set
+		// to produce the valid evidence
+		var dve *types.DuplicateVoteEvidence
+		switch {
+		case voteSet.VoteA.Height == state.LastBlockHeight:
+			dve = types.NewDuplicateVoteEvidence(
+				voteSet.VoteA,
+				voteSet.VoteB,
+				state.LastBlockTime,
+			)
+
+		case voteSet.VoteA.Height < state.LastBlockHeight:
+			blockMeta := evpool.blockStore.LoadBlockMeta(voteSet.VoteA.Height)
+			if blockMeta == nil {
+				evpool.logger.Error("failed to load block time for conflicting votes", "height", voteSet.VoteA.Height)
+				continue
+			}
+			dve = types.NewDuplicateVoteEvidence(
+				voteSet.VoteA,
+				voteSet.VoteB,
+				blockMeta.Header.Time,
+			)
+
+		default:
+			// evidence pool shouldn't expect to get votes from consensus of a height that is above the current
+			// state. If this error is seen then perhaps consider keeping the votes in the buffer and retry
+			// in following heights
+			evpool.logger.Error("inbound duplicate votes from consensus are of a greater height than current state",
+				"duplicate vote height", voteSet.VoteA.Height,
+				"state.LastBlockHeight", state.LastBlockHeight)
+			continue
+		}
+
+		// check if we already have this evidence
+		if evpool.IsPending(dve) {
+			evpool.logger.Debug("evidence already pending; ignoring", "evidence", dve)
+			continue
+		}
+
+		// check that the evidence is not already committed on chain
+		if evpool.IsCommitted(dve) {
+			evpool.logger.Debug("evidence already committed; ignoring", "evidence", dve)
+			continue
+		}
+
+		if err := evpool.addPendingEvidence(dve); err != nil {
+			evpool.logger.Error("failed to flush evidence from consensus buffer to pending list: %w", err)
+			continue
+		}
+
+		evpool.evidenceList.PushBack(dve)
+
+		evpool.logger.Info("verified new evidence of byzantine behavior", "evidence", dve)
+	}
+	// reset consensus buffer
+	evpool.consensusBuffer = make([]duplicateVoteSet, 0)
+}
+
+type duplicateVoteSet struct {
+	VoteA *types.Vote
+	VoteB *types.Vote
 }
 
 func evMapKey(ev types.Evidence) string {
